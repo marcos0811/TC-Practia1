@@ -1,101 +1,82 @@
-% Se realiza la lectura de los datos
 d = readmatrix("data_motor.csv");
-t = d(:,2); % Tiempo
-u = d(:,3); % Escalón 
-y = d(:,4); % Salida del sistema
+t = d(:,2);
+u = d(:,3);
+y = d(:,4);
 
-%% Definición de variables base
-y0 = y(2);           % valor inicial 
-yf = y(end);         % valor final 
-u0 = u(2);           % valor inicial de la entrada
-uf = u(end);         % valor final de la entrada
-U  = uf - u0;        % amplitud del escalón
-Dy = yf - y0;        % variación de la salida
+%se elimina los valores NaN
+valid_idx = ~isnan(t) & ~isnan(u) & ~isnan(y); 
+t = t(valid_idx);
+u = u(valid_idx);
+y = y(valid_idx);
 
-% Ganancia del sistema
-k = Dy / U;          % ganancia del proceso
+yi = y(1); %Primer valor de la respuesta del proceso
+yf = y(end); %Ultimo valor de la respeusta del proceso
+ui = u(1); % Primer valor de la se;al escalon
+uf = u(end); % Ultimo valor de la se;al escalon
+y_inicio = find(y ~= 0, 1);%buscamos el primer valor diferente de cero
+t0 = t(y_inicio);  % tiempo donde inicia el experimento
 
-%% Cálculo de pendiente (diferencia finita)
-v_prom = [];
-for i = 2:length(y)-1
-    prom = (y(i+1)-y(i))/(t(i+1)-t(i));
-    v_prom = [v_prom, prom];
-end
 
-m = max(v_prom); % pendiente máxima (punto de inflexión)
-v_max = find(v_prom == m,1); 
+% Método de Ziegler-Nichols
+v_prom = diff(y)./diff(t);
+m = max(v_prom);
+v_max = find(v_prom == m, 1);
+
 t1 = (t(v_max) + t(v_max+1))/2;
 y1 = (y(v_max) + y(v_max+1))/2;
 
-% Recta tangente
-e = y1 + m*(t - t1);
+Rt = y1 + m.*(t - t1);
 
-%% Método de Ziegler-Nichols
-t_theta = t1 + (y0 - y1)/m;   % tiempo muerto
-t_tau   = t1 + (yf - y1)/m;   % instante cuando alcanza yf
-tau     = t_tau - t_theta;    % constante de tiempo aparente
+k = (yf - yi)/(uf - ui); % Ganancia
+theta = t1 + (yi - y1)/m - t0; %tiempo mueto
+tau = t1 + (yf - y1)/m; %Tehta + tau
+tau1 = tau - theta; %constante de tiempo
 
-y_model1 = zeros(size(t));
-for i = 1:length(t)
-    if t(i) < t_theta
-        y_model1(i) = y0;
-    else
-        y_model1(i) = y0 + k*U*(1 - exp(-(t(i)-t_theta)/tau));
-    end
-end
+G1 = tf(k, [tau1 1], 'InputDelay', theta);
+fm = lsim(G1, u,t);
+error1 = mean((y-fm).^2); % se calclula el error cuadratico medio
 
-%% Método de Miller
-y_632 = y0 + 0.632*Dy;
-[~, idx_63] = min(abs(y - y_632));
-t_63 = t(idx_63);
+%Metodo dce miller, el valor de k y theta son los mismo que 
+k2 = k; 
+theta2 = theta;
+y2 = yi + 0.632*(yf-yi)-t0; %y2 es el valor donde inica el 63.2%
+[a, ind] = min(abs(y - y2)); %indice del valor mas cercano a 63.27%
+t2 = t(ind); %t2, valor del tiempo del 63.27% de y
+tau2 = t2 - theta2;
 
-tau2 = t_63 - t_theta;
+G2 = tf(k,[tau2 1],'InputDelay',theta2);
+fm2 = lsim(G2 ,u,t);
 
-y_model2 = zeros(size(t));
-for i = 1:length(t)
-    if t(i) < t_theta
-        y_model2(i) = y0;
-    else
-        y_model2(i) = y0 + k*U*(1 - exp(-(t(i)-t_theta)/tau2));
-    end
-end
+error2 = mean((y-fm2).^2); %error cuadratico medio del segundo metodo
+%metodo analitico
+y3 = y2 ; % el 63.27% desde que inicia el expereimento
+y3_i = yi + 0.284*(yf-yi) - t0; % el 28.4% desde que incia el experimento
 
-%% Método Analítico
-y_284 = y0 + 0.284*Dy;
-[~, idx_284] = min(abs(y - y_284));
-t_284 = t(idx_284);
+[b, ind2] = min(abs(y - y3_i)); % indice del valor del 28.4%
+t3 = t(ind2); % tiempo en el que inica el experimento del 28.4%
+tau3 = 3/2 * (t2 - t3);
+theta3 = t2 - tau3 ;
 
-tau3 = 3/2 * (t_63 - t_284);
-theta3 = t_63 - tau3;
+G3 = tf(k,[tau3 1],'InputDelay',theta3);
+fm3 = lsim(G3 ,u,t);
+error3 = mean((y-fm3).^2); %Error cuadratico medio
+figure
+hold on
+plot(t, u, 'Color', [0 0.447 0.741], 'LineWidth', 1.5)
+plot(t, fm, 'Color', [0.929 0.694 0.125], 'LineWidth', 1.5)
+plot(t, fm2, 'Color', [0.850 0.325 0.098], 'LineWidth', 1.5)
+plot(t, fm3, 'Color', [0.301 0.745 0.933], 'LineWidth', 1.5)
+plot(t, y, 'Color', [0.466 0.674 0.188], 'LineWidth', 1.5)
+plot(t, Rt, '--', 'Color', [0.494 0.184 0.556])
+yline(yf, 'g--')
+yline(yi, 'r--')
+plot(theta + t0, yi, 'ro', 'MarkerFaceColor', 'r')
+plot(tau1 + t0, yf, 'wo', 'MarkerFaceColor', 'w')
+xlabel('Tiempo (s)')
+ylabel('Amplitud')
+title('Integración Grafica')
+legend('Señal escalón','Metodo de Ziegler y Nichols','Metodo de Miller','Metodo Analitico',...
+    'Salida medida','Recta tangente','Línea 100','Línea 0')
+ylim([-0.1 1.6])
+grid on
 
-y_model3 = zeros(size(t));
-for i = 1:length(t)
-    if t(i) < theta3
-        y_model3(i) = y0;
-    else
-        y_model3(i) = y0 + k*U*(1 - exp(-(t(i)-theta3)/tau3));
-    end
-end
-
-%% Gráficas
-figure;
-plot(t, y, 'b', 'LineWidth',1.5);           % datos reales
-hold on;
-plot(t, y_model1, 'r', 'LineWidth',1.5); % modelo zegler nichols
-plot(t, y_model2, 'g', 'LineWidth',1.5); % modelo miller
-plot(t, y_model3, 'm', 'LineWidth',1.5); % modelo analítico
-plot(t, e, 'k:', 'LineWidth',1.5);         % recta tangente
-plot(t,u, 'g', 'LineWidth',1.5); % señal escalon
-
-
-yline(yf, '--', 'LineWidth',2)             % línea 100%
-yline(y0, '--','LineWidth',2, 'Color','yellow')    % línea base
-plot(t_theta, y0, 'ro', 'MarkerFaceColor','r'); % corte con base
-plot(t_tau, yf, 'go', 'MarkerFaceColor','g');   % corte con 100%
-
-grid on;
-legend('Respuesta al proceso','Ziegler y Nichols','Miller','Analítico','Tangente','Señal escalon','Linea 100%','Linea Base','\theta','\theta+\tau');
-xlabel('Tiempo [s]');
-ylabel('Salida');
-ylim([-0.1 1.6]);
-title('Identificación Grafica');
